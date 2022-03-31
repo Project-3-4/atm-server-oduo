@@ -1,0 +1,29 @@
+{
+        "noob": {
+                "noobTest": {
+                        "code": 200,
+                        "message": "[T1]: Test OK"
+                },
+                "expectedJSONError": {
+                        "code": 400,
+                        "message": "[NOOB]: Bad Request: Expected ` 'Content-Type':'application/json' `."
+                },
+                "somethingHappened": {
+                        "code": 500,
+                        "message": "[NOOB]: Internal server error. Something went wrong while trying to forward your request."
+                },
+                "invalidCertIssuer": {
+                        "message": "[NOOB]: Invalid certificate. Issuer info:\n"
+                },
+                "unauthorized": {
+                        "code": 403,
+                        "message": "[NOOB]: Unauthorized. Invalid certificate."
+                }
+        },
+        "wysd": {
+                "blame": " Blame skelm.",
+                "seeLogs": " Check the public log.",
+                "rtfm": " Check the docs.",
+                "sanityCheck": " Check your HTTP headers."
+        }
+}
