@@ -4,17 +4,25 @@ const app = express();
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
-const mysql = require('mysql');
+const mysql = require('mysql2');
+//const filepaths = require('../../filepaths.json');
+const dbcreds = require('../../dbcreds.json');
 
-var mysql      = require('mysql');
-var connection = mysql.createConnection({
-  host     : 'localhost',
-  user     : '******',
-  password : '******',
-  database : 'bank'
+const connection = mysql.createPool({
+    connectionLimit: 10,
+    host     : dbcreds.creds.host,
+    user     : dbcreds.creds.user,
+    password : dbcreds.creds.password,
+    database : dbcreds.creds.db
 });
 
-connection.connect();
+var errorCheck = 0;
+var userError = 0;
+var pinError = 0;
+var attemptError = 0;
+var attemptsRemaining = 3;
+
+//connection.connect();
 
 // const server = http.createServer(function(req, res){
 
@@ -39,7 +47,98 @@ connection.connect();
 //          fs.readFileSync(filepaths.noobCA)]
 // }
 
-function handlePostRequest(req, res, retObj) {
+userCheck = (req) =>{
+    return new Promise((resolve, reject)=>{
+        connection.query('SELECT userId FROM users WHERE userId = ' + req.body.body.acctNo, function(error, results, fields) {
+            if (results[0] == undefined) {
+                userError = 1;
+            };
+            if(error){
+                return reject(error);
+            }
+            return resolve(results);
+        });
+    });
+};
+
+attemptCheck = (req) =>{
+    return new Promise((resolve, reject)=>{
+        connection.query('SELECT attemptsLeft FROM users WHERE userId = '+ req.body.body.acctNo, function(error, results, fields) {
+            if (results[0].attemptsLeft <= 0) {
+                console.log("too many attempts: "+ results[0].attemptsLeft);
+                attemptError = 1;
+            }
+            if(error){
+                return reject(error);
+            }
+            return resolve(results);
+        });
+    });
+};
+
+decrementAttempts = (req) =>{
+    return new Promise((resolve, reject)=>{
+        connection.query('UPDATE users SET attemptsLeft = attemptsLeft-1 WHERE userId = '+ req.body.body.acctNo, function(error, results, fields) {});
+        connection.query('SELECT attemptsLeft FROM users WHERE userId = '+ req.body.body.acctNo, function(error, results, fields) {
+            console.log("new attemptsLeft: " + results[0].attemptsLeft);
+            attemptsRemaining = results[0].attemptsLeft;
+            return resolve(results);
+        });
+    });
+};
+
+pinCheck = (req) =>{
+    return new Promise((resolve, reject)=>{
+        connection.query('SELECT pin FROM users WHERE pin = ' + req.body.body.pin + ' AND userId = '+ req.body.body.acctNo, function(error, results, fields) {
+            if (results[0] == undefined) {
+                pinError = 1;
+            }
+            if(error){
+                return reject(error);
+            }
+            return resolve(results);
+        });
+    });
+};
+
+checkBalance = (req) =>{
+    return new Promise((resolve, reject)=>{
+        connection.query('SELECT balance FROM users WHERE userId = '+ req.body.body.acctNo, function(error, results, fields) {
+            console.log("balance: " + results[0].balance);
+            return resolve(results);
+        });
+    });
+};
+
+withdrawMoney = (req) =>{
+    return new Promise((resolve, reject)=>{
+        connection.query('UPDATE users SET balance = balance - ' + req.body.body.amount + ' WHERE userId = '+ req.body.body.acctNo, function(error, results, fields) {
+            console.log("Withdrawing: " + req.body.body.amount);
+            return resolve(results);
+        });
+    });
+};
+
+async function handleBalanceRequest(req, res, retObj) {
+    handlePostRequest(req, res, retObj);
+    if (errorCheck == 0) {
+        const bal = await checkBalance(req);
+        retObj.body = {'balance': bal[0].balance};
+        return res.status(200).json(retObj);
+    }
+}
+
+async function handleWithdrawRequest(req, res, retObj) {
+    handlePostRequest(req, res, retObj);
+    if (errorCheck == 0) {
+        const withdraw = await withdrawMoney(req);
+        const bal = await checkBalance(req);
+        retObj.body = {'balance': bal[0].balance};
+        return res.status(200).json(retObj);
+    }
+}
+
+async function handlePostRequest(req, res, retObj) {
     // if (!req.is('application/json')){
     //     console.log(r.expectedJSONError.message + wysd.sanityCheck)
     //     res.status(r.expectedJSONError.code).send(r.expectedJSONError.message + wysd.sanityCheck);
@@ -53,43 +152,43 @@ function handlePostRequest(req, res, retObj) {
     // }
 
     //TODO incorrect body
+    // TODO not enough balance
 
-    //Check if user exists
-    connection.query('SELECT userId FROM users WHERE userId = ' + req.body.head.acctNo, function(error, results, fields) {
-        if (error) {
+    userError = 0;
+    pinError = 0;
+    attemptError = 0;
+
+
+    const check1 = await userCheck(req);
+    if (userError == 1) {
+        JSON.stringify(retObj);
+        console.log("Invalid user");
+        errorCheck = 1;
+        return res.status(404).json(retObj);
+    } else {
+        const check2 = await attemptCheck(req);
+        if (attemptError == 1) {
+            retObj.body = {'attemptsLeft': attemptsRemaining};
             JSON.stringify(retObj);
-            res.status(404).json(retObj);
-            return;
+            console.log("Too many incorrect attempts");
+            errorCheck = 1;
+            return res.status(403).json(retObj);
+        } else {
+            const check3 = await pinCheck(req);
+            if (pinError == 1) {
+                const checkingAttempts = await decrementAttempts(req);
+                retObj.body = {'attemptsLeft': attemptsRemaining};
+                JSON.stringify(retObj);
+                console.log("Invalid pin");
+                errorCheck = 1;
+                return res.status(401).json(retObj);
+            };
         };
-    });
-    //check if pass is blocked (too many incorrect attempts)
-    connection.query('SELECT incorrectAttempts FROM users WHERE userId = ' + req.body.head.acctNo, function(error, results, fields) {
-        if (error) {
-            console.log('unexpected error fetching incorrectAttempts');
-        };
-        if (results[0] <= 0) {
-            JSON.stringify(retObj);
-            res.status(403).json(retObj);
-            return;
-        }
-    });
-
-    //Check if the pin is correct //TODO incorrectAttempts in database -> attemptsLeft
-    connection.query('SELECT pin, incorrectAttempts FROM users WHERE pin = ' + req.body.head.pin + 'AND userId = '+ req.body.head.acctNo, function(error, results, fields) {
-        if (error) {
-            retObj.body = {'attemptsLeft': results[1]};
-            JSON.stringify(retObj);
-            res.status(401).json(retObj);
-            return;
-        };
-    });
-    // not enough balance
-
-
-
-    retObj.body = {'balance': 200000};
-    res.status(200).json(retObj);
-    
+    };
+    console.log("no errors found");
+    errorCheck = 0;
+    attemptsRemaining = 0;
+    return;
 }
 
 app.use(express.json())
@@ -101,39 +200,39 @@ app.get('/test', (req, res) => {
 });
 
 app.post('/balance', (req, res) => {
-    console.log('Incoming balance request');
+    console.log('Incoming balance request from: ' + req.body.head.fromBank);
     const retObj = {
-            'head': {
-                'fromCtry': 'T1',
-                'fromBank': 'TEST',
-                'toCtry': req.body.head.fromCtry,
-                'toBank': req.body.head.fromBank
-            },
-            'body': {
-                // 'balance': 200000 // Double
-            }
+        'head': {
+            'fromCtry': 'T1',
+            'fromBank': 'TEST',
+            'toCtry': req.body.head.fromCtry,
+            'toBank': req.body.head.fromBank
+        },
+        'body': {
+            // 'balance': 200000 // Double
+        }
     };
-    
-    handlePostRequest(req, res, retObj);
-    console.log('Handled balance request');
+
+    handleBalanceRequest(req, res, retObj);
+    return;
 });
 
 app.post('/withdraw', (req, res) => {
-    const retObj = JSON.stringify({
-            'head': {
-                'fromCtry': 'T1',
-                'fromBank': 'TEST',
-                'toCtry': req.body.head.fromCtry,
-                'toBank': req.body.head.fromBank
-            },
-            'body': {
-                // 'balance': 199800
-            }
-    });
-    console.log('Incoming withdraw request');
-    handlePostRequest(req, res, retObj);
+    console.log('Incoming withdraw request from: ' + req.body.head.fromBank);
+    const retObj = {
+        'head': {
+            'fromCtry': 'T1',
+            'fromBank': 'TEST',
+            'toCtry': req.body.head.fromCtry,
+            'toBank': req.body.head.fromBank
+        },
+        'body': {
+            // 'balance': 199800
+        }
+    };
+    handleWithdrawRequest(req, res, retObj);
+    return;
 });
 
 http.createServer(app).listen(8443, function(){
     console.log('listening on port 8443');
-})
