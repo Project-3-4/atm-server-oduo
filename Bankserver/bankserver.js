@@ -49,7 +49,7 @@ var attemptsRemaining = 3;
 
 userCheck = (req) =>{
     return new Promise((resolve, reject)=>{
-        connection.query('SELECT userId FROM users WHERE userId = ' + req.body.body.acctNo, function(error, results, fields) {
+        connection.query('SELECT userId FROM users WHERE userId = \'' + req.body.body.acctNo + "\'", function(error, results, fields) {
             if (results[0] == undefined) {
                 userError = 1;
             };
@@ -63,10 +63,11 @@ userCheck = (req) =>{
 
 attemptCheck = (req) =>{
     return new Promise((resolve, reject)=>{
-        connection.query('SELECT attemptsLeft FROM users WHERE userId = '+ req.body.body.acctNo, function(error, results, fields) {
+        connection.query('SELECT attemptsLeft FROM users WHERE userId = \''+ req.body.body.acctNo + "\'", function(error, results, fields) {
             if (results[0].attemptsLeft <= 0) {
                 console.log("too many attempts: "+ results[0].attemptsLeft);
                 attemptError = 1;
+                attemptsRemaining = results[0].attemptsLeft;
             }
             if(error){
                 return reject(error);
@@ -78,8 +79,8 @@ attemptCheck = (req) =>{
 
 decrementAttempts = (req) =>{
     return new Promise((resolve, reject)=>{
-        connection.query('UPDATE users SET attemptsLeft = attemptsLeft-1 WHERE userId = '+ req.body.body.acctNo, function(error, results, fields) {});
-        connection.query('SELECT attemptsLeft FROM users WHERE userId = '+ req.body.body.acctNo, function(error, results, fields) {
+        connection.query('UPDATE users SET attemptsLeft = attemptsLeft-1 WHERE userId = \''+ req.body.body.acctNo + "\'", function(error, results, fields) {});
+        connection.query('SELECT attemptsLeft FROM users WHERE userId = \''+ req.body.body.acctNo + "\'", function(error, results, fields) {
             console.log("new attemptsLeft: " + results[0].attemptsLeft);
             attemptsRemaining = results[0].attemptsLeft;
             return resolve(results);
@@ -87,9 +88,17 @@ decrementAttempts = (req) =>{
     });
 };
 
+resetAttempts = (req) =>{
+    return new Promise((resolve, reject)=>{
+        connection.query('UPDATE users SET attemptsLeft = 3 WHERE userId = \''+ req.body.body.acctNo + "\'", function(error, results, fields) {
+            return resolve(results);
+        });
+    });
+};
+
 pinCheck = (req) =>{
     return new Promise((resolve, reject)=>{
-        connection.query('SELECT pin FROM users WHERE pin = ' + req.body.body.pin + ' AND userId = '+ req.body.body.acctNo, function(error, results, fields) {
+        connection.query('SELECT pin FROM users WHERE pin = ' + req.body.body.pin + ' AND userId = \''+ req.body.body.acctNo + "\'", function(error, results, fields) {
             if (results[0] == undefined) {
                 pinError = 1;
             }
@@ -103,7 +112,7 @@ pinCheck = (req) =>{
 
 checkBalance = (req) =>{
     return new Promise((resolve, reject)=>{
-        connection.query('SELECT balance FROM users WHERE userId = '+ req.body.body.acctNo, function(error, results, fields) {
+        connection.query('SELECT balance FROM users WHERE userId = \''+ req.body.body.acctNo + "\'", function(error, results, fields) {
             console.log("balance: " + results[0].balance);
             return resolve(results);
         });
@@ -112,7 +121,7 @@ checkBalance = (req) =>{
 
 withdrawMoney = (req) =>{
     return new Promise((resolve, reject)=>{
-        connection.query('UPDATE users SET balance = balance - ' + req.body.body.amount + ' WHERE userId = '+ req.body.body.acctNo, function(error, results, fields) {
+        connection.query('UPDATE users SET balance = balance - ' + req.body.body.amount + ' WHERE userId = \''+ req.body.body.acctNo + "\'", function(error, results, fields) {
             console.log("Withdrawing: " + req.body.body.amount);
             return resolve(results);
         });
@@ -120,7 +129,7 @@ withdrawMoney = (req) =>{
 };
 
 async function handleBalanceRequest(req, res, retObj) {
-    handlePostRequest(req, res, retObj);
+    await handlePostRequest(req, res, retObj);
     if (errorCheck == 0) {
         const bal = await checkBalance(req);
         retObj.body = {'balance': bal[0].balance};
@@ -185,6 +194,7 @@ async function handlePostRequest(req, res, retObj) {
             };
         };
     };
+    await resetAttempts(req);
     console.log("no errors found");
     errorCheck = 0;
     attemptsRemaining = 0;
@@ -236,3 +246,4 @@ app.post('/withdraw', (req, res) => {
 
 http.createServer(app).listen(8443, function(){
     console.log('listening on port 8443');
+})
