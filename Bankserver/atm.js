@@ -15,10 +15,7 @@ var status;
 handlePython();
 app.get('/pypin', async (req, res) => {
     //console.log('json: ' ,pythondata.fromBank);
-    console.log("pre-function");
     await handlePython();
-    console.log(res.statusCode);
-    console.log("post-function");
     // console.log(balance)
     // console.log(balance.toString())
     console.log("status = " + status);
@@ -26,6 +23,8 @@ app.get('/pypin', async (req, res) => {
         res.status(200).send();
     } else if (status === 401 || status === 403) {
         res.status(200).send(remainder.toString());
+    } else if (status === 406) {
+        res.status(200).send(balance.toString());
     } else {
         console.log("unexpected error")
     }
@@ -37,6 +36,8 @@ app.get('/python', async (req, res) => {
     // console.log(balance)
     // console.log(balance.toString())
     if (status === 200) {
+        res.status(200).send(balance.toString());
+    } else if (status === 406) {
         res.status(200).send(balance.toString());
     } else {
         console.log("error: " + status);
@@ -55,7 +56,7 @@ async function handlePython(){
                 'toBank':   pythondata.toBank
             },
             body: {
-                'acctNo' : pythondata.acctNo,//'GLODUO0000135700', //GLODUO0000135700 1234 || GLBAOV0000000000 6666
+                'acctNo' : pythondata.acctNo, //GLODUO0000135700 1234 || GLBAOV0000000000 6666
                 'pin': pythondata.pin,
                 'amount' : pythondata.amount
             }
@@ -99,6 +100,6 @@ async function handlePython(){
 
 
 
-http.createServer(req, app).listen(443, function(){
-    console.log('listening on port 443');
+http.createServer(req, app).listen(8080, function(){
+    console.log('listening on port 8080');
 })

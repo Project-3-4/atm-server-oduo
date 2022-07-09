@@ -21,6 +21,7 @@ var userError = 0;
 var pinError = 0;
 var attemptError = 0;
 var attemptsRemaining = 3;
+var decrementCheck = 0;
 
 //connection.connect();
 
@@ -49,7 +50,7 @@ var attemptsRemaining = 3;
 
 userCheck = (req) =>{
     return new Promise((resolve, reject)=>{
-        connection.query('SELECT userId FROM users WHERE userId = \'' + req.body.body.acctNo + "\'", function(error, results, fields) {
+        connection.query('SELECT userId FROM users WHERE userId = ?',[req.body.body.acctNo], function(error, results, fields) {
             if (results[0] == undefined) {
                 userError = 1;
             };
@@ -63,7 +64,7 @@ userCheck = (req) =>{
 
 attemptCheck = (req) =>{
     return new Promise((resolve, reject)=>{
-        connection.query('SELECT attemptsLeft FROM users WHERE userId = \''+ req.body.body.acctNo + "\'", function(error, results, fields) {
+        connection.query('SELECT attemptsLeft FROM users WHERE userId = ?',[req.body.body.acctNo], function(error, results, fields) {
             if (results[0].attemptsLeft <= 0) {
                 console.log("too many attempts: "+ results[0].attemptsLeft);
                 attemptError = 1;
@@ -79,10 +80,11 @@ attemptCheck = (req) =>{
 
 decrementAttempts = (req) =>{
     return new Promise((resolve, reject)=>{
-        connection.query('UPDATE users SET attemptsLeft = attemptsLeft-1 WHERE userId = \''+ req.body.body.acctNo + "\'", function(error, results, fields) {});
-        connection.query('SELECT attemptsLeft FROM users WHERE userId = \''+ req.body.body.acctNo + "\'", function(error, results, fields) {
+        connection.query('UPDATE users SET attemptsLeft = attemptsLeft-1 WHERE userId = ?',[req.body.body.acctNo], function(error, results, fields) {});
+        connection.query('SELECT attemptsLeft FROM users WHERE userId = ?',[req.body.body.acctNo], function(error, results, fields) { // TODO split in 2 function cuz probably causing problems
             console.log("new attemptsLeft: " + results[0].attemptsLeft);
             attemptsRemaining = results[0].attemptsLeft;
+            decrementCheck = 1;
             return resolve(results);
         });
     });
@@ -90,7 +92,7 @@ decrementAttempts = (req) =>{
 
 resetAttempts = (req) =>{
     return new Promise((resolve, reject)=>{
-        connection.query('UPDATE users SET attemptsLeft = 3 WHERE userId = \''+ req.body.body.acctNo + "\'", function(error, results, fields) {
+        connection.query('UPDATE users SET attemptsLeft = 3 WHERE userId = ?',[req.body.body.acctNo], function(error, results, fields) {
             return resolve(results);
         });
     });
@@ -98,8 +100,8 @@ resetAttempts = (req) =>{
 
 pinCheck = (req) =>{
     return new Promise((resolve, reject)=>{
-        connection.query('SELECT pin FROM users WHERE pin = ' + req.body.body.pin + ' AND userId = \''+ req.body.body.acctNo + "\'", function(error, results, fields) {
-            if (results[0] == undefined) {
+        connection.query('SELECT pin FROM users WHERE pin = ? AND userId = ?',[req.body.body.pin, req.body.body.acctNo], function(error, results, fields) {
+            if (results[0] === undefined) {
                 pinError = 1;
             }
             if(error){
@@ -112,7 +114,7 @@ pinCheck = (req) =>{
 
 checkBalance = (req) =>{
     return new Promise((resolve, reject)=>{
-        connection.query('SELECT balance FROM users WHERE userId = \''+ req.body.body.acctNo + "\'", function(error, results, fields) {
+        connection.query('SELECT balance FROM users WHERE userId = ?',[req.body.body.acctNo], function(error, results, fields) {
             console.log("balance: " + results[0].balance);
             return resolve(results);
         });
@@ -121,7 +123,7 @@ checkBalance = (req) =>{
 
 withdrawMoney = (req) =>{
     return new Promise((resolve, reject)=>{
-        connection.query('UPDATE users SET balance = balance - ' + req.body.body.amount + ' WHERE userId = \''+ req.body.body.acctNo + "\'", function(error, results, fields) {
+        connection.query('UPDATE users SET balance = balance - ? WHERE userId = ?',[req.body.body.amount, req.body.body.acctNo], function(error, results, fields) {
             console.log("Withdrawing: " + req.body.body.amount);
             return resolve(results);
         });
@@ -135,6 +137,7 @@ async function handleBalanceRequest(req, res, retObj) {
         retObj.body = {'balance': bal[0].balance};
         return res.status(200).json(retObj);
     }
+    errorCheck = 0;
 }
 
 async function handleWithdrawRequest(req, res, retObj) {
@@ -145,6 +148,7 @@ async function handleWithdrawRequest(req, res, retObj) {
         retObj.body = {'balance': bal[0].balance};
         return res.status(200).json(retObj);
     }
+    errorCheck = 0;
 }
 
 async function handlePostRequest(req, res, retObj) {
@@ -185,20 +189,30 @@ async function handlePostRequest(req, res, retObj) {
         } else {
             const check3 = await pinCheck(req);
             if (pinError == 1) {
+                decrementCheck = 0;
                 const checkingAttempts = await decrementAttempts(req);
-                retObj.body = {'attemptsLeft': attemptsRemaining};
-                JSON.stringify(retObj);
-                console.log("Invalid pin");
-                errorCheck = 1;
-                return res.status(401).json(retObj);
+                if (decrementCheck == 1) {
+                    retObj.body = {'attemptsLeft': attemptsRemaining};
+                    JSON.stringify(retObj);
+                    console.log("Invalid pin");
+                    errorCheck = 1;
+                    return res.status(401).json(retObj);
+                }
+            } else{
+                const check4 = await checkBalance(req);
+                if (check4[0].balance < 0) {
+                    console.log("not enough balance");
+                    retObj.body = {'balance': check4[0].balance};
+                    JSON.stringify(retObj);
+                    errorCheck = 1;
+                    return res.status(406).json(retObj);
+                }
             };
         };
     };
-    await resetAttempts(req);
+    const doThis = await resetAttempts(req);
     console.log("no errors found");
-    errorCheck = 0;
     attemptsRemaining = 0;
-    return;
 }
 
 app.use(express.json())
@@ -211,36 +225,60 @@ app.get('/test', (req, res) => {
 
 app.post('/balance', (req, res) => {
     console.log('Incoming balance request from: ' + req.body.head.fromBank);
-    const retObj = {
-        'head': {
-            'fromCtry': 'T1',
-            'fromBank': 'TEST',
-            'toCtry': req.body.head.fromCtry,
-            'toBank': req.body.head.fromBank
-        },
-        'body': {
-            // 'balance': 200000 // Double
-        }
-    };
+    try {
+        const retObj = {
+            'head': {
+                'fromCtry': 'GL',
+                'fromBank': 'ODUO',
+                'toCtry': req.body.head.fromCtry,
+                'toBank': req.body.head.fromBank
+            },
+            'body': {
+                // 'balance': 200000 // Double
+            }
+        };
 
-    handleBalanceRequest(req, res, retObj);
+        if (req.body.body.acctNo && req.body.body.pin) {
+
+        } else {
+            console.log("Incorrect body")
+            throw e;
+        }
+        handleBalanceRequest(req, res, retObj);
+    } catch (e) {
+        console.log("error in request")
+        return res.status(400).send();
+    }
+
     return;
 });
 
 app.post('/withdraw', (req, res) => {
     console.log('Incoming withdraw request from: ' + req.body.head.fromBank);
-    const retObj = {
-        'head': {
-            'fromCtry': 'T1',
-            'fromBank': 'TEST',
-            'toCtry': req.body.head.fromCtry,
-            'toBank': req.body.head.fromBank
-        },
-        'body': {
-            // 'balance': 199800
+    try {
+        const retObj = {
+            'head': {
+                'fromCtry': 'GL',
+                'fromBank': 'ODUO',
+                'toCtry': req.body.head.fromCtry,
+                'toBank': req.body.head.fromBank
+            },
+            'body': {
+                // 'balance': 200000 // Double
+            }
+        };
+        if (req.body.body.acctNo && req.body.body.pin && req.body.body.amount) {
+
+        } else {
+            console.log("Incorrect body")
+            throw e;
         }
-    };
-    handleWithdrawRequest(req, res, retObj);
+        handleWithdrawRequest(req, res, retObj);
+    } catch (e) {
+        console.log("error in request")
+        return res.status(400).send();
+    }
+
     return;
 });
 
